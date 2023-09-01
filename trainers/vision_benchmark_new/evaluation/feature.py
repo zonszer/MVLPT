@@ -18,9 +18,11 @@ from torchvision import transforms
 import torchvision.models
 import torchvision.datasets
 import torch.nn.functional as F
+from .metric import get_metric
 
 from ..common.constants import get_dataset_hub, VISION_DATASET_STORAGE
 
+from ..models import *
 from ..datasets import class_map, template_map
 
 from PIL import Image
@@ -32,8 +34,8 @@ import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import wordnet as wn
 
-# nltk.download('punkt')
-# nltk.download('wordnet')
+nltk.download('punkt')
+nltk.download('wordnet')
 
 import pdb
 
@@ -120,13 +122,11 @@ def get_dataloader(dataset, val_split=0.0, batch_size_per_gpu=64, workers=6, pin
                 elif dataset_info.type == DatasetTypes.IC_MULTICLASS:
                     labels = [multiclass_to_int(x.labels) for x in dataset_manifest.images]
                 else:
-                    return None
                     raise NotImplementedError
                 return np.asarray(labels)
 
             logging.info('Quick fetch label starts.')
             labels = quick_fetch_labels(dataset)
-            
             logging.info('Quick fetch label finished.')
             # logging.info('Full fetch label starts.')
             # labels_all_fetch = np.asarray([x[1] for x in dataset])
@@ -135,11 +135,7 @@ def get_dataloader(dataset, val_split=0.0, batch_size_per_gpu=64, workers=6, pin
             # logging.info('Quick fetch label same as full fetch.')
 
             # FIX: class-balanced split generation
-            if labels is None:
-                # HACK: class inbalanced split for multi-task
-                train_idx, val_idx = train_test_split(list(range(len(dataset))), test_size=val_split)
-
-            elif len(labels.shape) == 1:
+            if len(labels.shape) == 1:
                 # single-class IC datasets
                 cls_to_count = Counter(labels)
                 val_indices = []
@@ -226,7 +222,12 @@ def load_custom_zeroshot_model(config):
     model_file = config.TEST.MODEL_FILE
     logging.info(f'=> load model file: {model_file}')
     ext = model_file.split('.')[-1]
-    if ext == 'pth' or ext == 'pt':
+    if model_file.startswith('hf:'):
+        from huggingface_hub import hf_hub_download
+        _, hf_repo, hf_file = model_file.split(':')
+        cache_file = hf_hub_download(repo_id=hf_repo, filename=hf_file)
+        state_dict = torch.load(cache_file, map_location='cpu')
+    elif ext == 'pth' or ext == 'pt':
         state_dict = torch.load(model_file, map_location="cpu")
     elif ext == 'pkl':
         logging.info('=> load pkl model')
@@ -327,7 +328,7 @@ def extract_feature(model, data_loader, config):
     model.eval()
 
     # Generate model statistics
-    visual_backbone = model.visual if model.visual is not None else model
+    visual_backbone = model.visual if hasattr(model, 'visual') else model
     model_info = config.MODEL.STATS
     config.defrost()
     model_info['n_visual_params'] = sum(p.numel() for p in visual_backbone.parameters())
@@ -357,7 +358,7 @@ def extract_feature(model, data_loader, config):
 
 
 def multilabel_to_vec(indices, n_classes):
-    vec = np.zeros(n_classes, dtype=np.int)
+    vec = np.zeros(n_classes)
     for x in indices:
         vec[x] = 1
     return vec
@@ -370,7 +371,7 @@ def multiclass_to_int(indices):
 def extract_features(config, feature_type="image", test_split_only=False):
     model = get_model(config, feature_type=feature_type)
 
-    train_dataloader, val_dataloader, test_dataloader = construct_dataloader(config, feature_type="image", test_split_only=False)
+    train_dataloader, val_dataloader, test_dataloader = construct_dataloader(config, feature_type="image", test_split_only=test_split_only)
 
     test_features, test_labels = extract_feature(model, test_dataloader, config)
     if test_split_only:
@@ -539,17 +540,17 @@ def construct_dataloader(config, feature_type="image", test_split_only=False):
     if config.DATASET.CENTER_CROP:
         logging.info('Do center crop')
         transform_clip = transforms.Compose([
-            transforms.Resize(config.INPUT.SIZE[0], interpolation=Image.BICUBIC),
-            transforms.CenterCrop(size=config.INPUT.SIZE),
+            transforms.Resize(config.TRAIN.IMAGE_SIZE[0], interpolation=Image.BICUBIC),
+            transforms.CenterCrop(size=config.TRAIN.IMAGE_SIZE),
             transforms.ToTensor(),
-            transforms.Normalize(mean=config.INPUT.PIXEL_MEAN, std=config.INPUT.PIXEL_STD),
+            transforms.Normalize(mean=config.INPUT.MEAN, std=config.INPUT.STD),
         ])
     else:
         logging.info('no center crop')
         transform_clip = transforms.Compose([
-            transforms.Resize(config.INPUT.SIZE, interpolation=Image.BICUBIC),
+            transforms.Resize(config.TRAIN.IMAGE_SIZE, interpolation=Image.BICUBIC),
             transforms.ToTensor(),
-            transforms.Normalize(mean=config.INPUT.PIXEL_MEAN, std=config.INPUT.PIXEL_STD),
+            transforms.Normalize(mean=config.INPUT.MEAN, std=config.INPUT.STD),
         ])
 
     from vision_datasets import Usages, DatasetTypes
@@ -557,7 +558,6 @@ def construct_dataloader(config, feature_type="image", test_split_only=False):
     hub = get_dataset_hub()
     dataset_names = set([x['name'] for x in hub.list_data_version_and_types()])
     if config.DATASET.DATASET in dataset_names:
-        # vision_dataset_storage = 'https://cvinthewildeus.blob.core.windows.net/datasets'
         vision_dataset_storage = 'https://cvinthewildeus.blob.core.windows.net/datasets?sp=r&st=2023-08-28T01:41:20Z&se=3023-08-28T09:41:20Z&sv=2022-11-02&sr=c&sig=Msoq5dIl%2Fve6F01edGr8jgcZUt7rtsuJ896xvstSNfM%3D'
         local_temp = config.DATASET.ROOT
 
@@ -580,10 +580,10 @@ def construct_dataloader(config, feature_type="image", test_split_only=False):
             def transform_clip(x, y):
                 return (previous_transform(x), multiclass_to_int(y))
 
+        train_dataloader = val_dataloader = None
         test_dataloader = get_dataloader(TorchDataset(ManifestDataset(test_set_dataset_info, test_set), transform=transform_clip))
         # download train/val split only if test_split_only is False
         if not test_split_only:
-            logging.info('Creating datatset')
             train_set_results = hub.create_dataset_manifest(vision_dataset_storage, local_temp, config.DATASET.DATASET, usage=Usages.TRAIN_PURPOSE)
             if train_set_results:
                 train_set, train_set_dataset_info, _ = train_set_results
@@ -598,16 +598,12 @@ def construct_dataloader(config, feature_type="image", test_split_only=False):
                 num_samples_per_class = config.DATASET.NUM_SAMPLES_PER_CLASS
                 random_seed = config.DATASET.RANDOM_SEED_SAMPLING
                 train_set = train_set.sample_few_shot_subset(num_samples_per_class, random_seed)
-            
+                
             val_split=0.2
-            if config.DATASET.NUM_SAMPLES_PER_CLASS == 1:
-                batch_size = min(config.DATALOADER.TRAIN_X.BATCH_SIZE, len(train_set))
-                train_dataloader = get_dataloader(TorchDataset( ManifestDataset(train_set_dataset_info, train_set), transform=transform_clip), val_split=0.0, batch_size_per_gpu=batch_size)
-                val_dataloader = get_dataloader(TorchDataset( ManifestDataset(train_set_dataset_info, train_set), transform=transform_clip), val_split=0.0, batch_size_per_gpu=batch_size)
-            else:
-                train_dataloader, val_dataloader = get_dataloader(TorchDataset( ManifestDataset(train_set_dataset_info, train_set), transform=transform_clip), val_split=val_split, batch_size_per_gpu=config.DATALOADER.TRAIN_X.BATCH_SIZE)
+            train_dataloader, val_dataloader = get_dataloader(TorchDataset( ManifestDataset(train_set_dataset_info, train_set), transform=transform_clip), val_split=val_split)
             logging.info(f'Val split from Train set: Train size is {len(train_set.images)*(1-val_split)}, and validation size is {len(train_set.images)*val_split}.')
     else:
+        train_dataloader = val_dataloader = None
         if not test_split_only:
             if config.DATASET.VAL_SET:
                 train_dataloader = get_dataloader(torchvision.datasets.ImageFolder(os.path.join(config.DATASET.ROOT, config.DATASET.TRAIN_SET), transform=transform_clip))
@@ -617,247 +613,4 @@ def construct_dataloader(config, feature_type="image", test_split_only=False):
                                                                     val_split=0.2)
         test_dataloader = get_dataloader(torchvision.datasets.ImageFolder(os.path.join(config.DATASET.ROOT, config.DATASET.TEST_SET), transform=transform_clip))
 
-    return train_dataloader, val_dataloader, test_dataloader, class_map.get(config.DATASET.DATASET), train_set
-
-
-def construct_dataset(config, feature_type="image", test_split_only=False):
-    if config.DATASET.CENTER_CROP:
-        logging.info('Do center crop')
-        transform_clip = transforms.Compose([
-            transforms.Resize(config.INPUT.SIZE[0], interpolation=Image.BICUBIC),
-            transforms.CenterCrop(size=config.INPUT.SIZE),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=config.INPUT.PIXEL_MEAN, std=config.INPUT.PIXEL_STD),
-        ])
-    else:
-        logging.info('no center crop')
-        transform_clip = transforms.Compose([
-            transforms.Resize(config.INPUT.SIZE, interpolation=Image.BICUBIC),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=config.INPUT.PIXEL_MEAN, std=config.INPUT.PIXEL_STD),
-        ])
-
-    from vision_datasets import Usages, DatasetTypes
-    from vision_datasets.pytorch import TorchDataset
-    hub = get_dataset_hub()
-    dataset_names = set([x['name'] for x in hub.list_data_version_and_types()])
-    if config.DATASET.DATASET in dataset_names:
-        vision_dataset_storage = 'https://cvinthewildeus.blob.core.windows.net/datasets'
-        local_temp = config.DATASET.ROOT
-
-        # return [manifest, dataset_info, downloader_resources]
-        results = hub.create_dataset_manifest(vision_dataset_storage, local_temp, config.DATASET.DATASET, usage=Usages.TEST_PURPOSE)
-        if results:
-            test_set, test_set_dataset_info, _ = results
-        logging.info(f'Test size is {len(test_set.images)}.')
-        
-        # re-define transform_clip to organize the labels
-        if test_set_dataset_info.type == DatasetTypes.IC_MULTILABEL:
-            previous_transform = transform_clip
-
-            def transform_clip(x, y):
-                test_set_ = ManifestDataset(test_set_dataset_info, test_set)
-                return (previous_transform(x), multilabel_to_vec(y, len(test_set_.labels)))
-        elif test_set_dataset_info.type == DatasetTypes.IC_MULTICLASS:
-            previous_transform = transform_clip
-
-            def transform_clip(x, y):
-                return (previous_transform(x), multiclass_to_int(y))
-
-        # test_dataset = ManifestDataset(test_set_dataset_info, test_set)
-        # test_dataloader = get_dataloader(TorchDataset(ManifestDataset(test_set_dataset_info, test_set), transform=transform_clip))
-        # download train/val split only if test_split_only is False
-        if not test_split_only:
-            logging.info('Creating datatset')
-            train_set_results = hub.create_dataset_manifest(vision_dataset_storage, local_temp, config.DATASET.DATASET, usage=Usages.TRAIN_PURPOSE)
-            if train_set_results:
-                train_set, train_set_dataset_info, _ = train_set_results
-
-            val_set = None
-            val_set_results = hub.create_dataset_manifest(vision_dataset_storage, local_temp, config.DATASET.DATASET, usage=Usages.VAL_PURPOSE)
-            if val_set_results:
-                val_set, val_set_dataset_info, _ = val_set_results
-
-            # few-shot dataset construction
-            # if config.DATASET.NUM_SAMPLES_PER_CLASS > 0:
-            #     num_samples_per_class = config.DATASET.NUM_SAMPLES_PER_CLASS
-            #     random_seed = config.DATASET.RANDOM_SEED_SAMPLING
-            #     train_set = train_set.sample_few_shot_subset(num_samples_per_class, random_seed)
-            # train_dataset = ManifestDataset(train_set_dataset_info, train_set)
-            
-            # val_split=0.2
-            # train_dataloader, val_dataloader = get_dataloader(TorchDataset( ManifestDataset(train_set_dataset_info, train_set), transform=transform_clip), val_split=val_split, batch_size_per_gpu=config.DATALOADER.TRAIN_X.BATCH_SIZE)
-            # logging.info(f'Val split from Train set: Train size is {len(train_set.images)*(1-val_split)}, and validation size is {len(train_set.images)*val_split}.')
-    # else:
-    #     if not test_split_only:
-    #         if config.DATASET.VAL_SET:
-    #             train_dataloader = get_dataloader(torchvision.datasets.ImageFolder(os.path.join(config.DATASET.ROOT, config.DATASET.TRAIN_SET), transform=transform_clip))
-    #             val_dataloader = get_dataloader(torchvision.datasets.ImageFolder(os.path.join(config.DATASET.ROOT, config.DATASET.VAL_SET), transform=transform_clip))
-    #         else:
-    #             train_dataloader, val_dataloader = get_dataloader(torchvision.datasets.ImageFolder(os.path.join(config.DATASET.ROOT, config.DATASET.TRAIN_SET), transform=transform_clip),
-    #                                                                 val_split=0.2)
-    #     test_dataloader = get_dataloader(torchvision.datasets.ImageFolder(os.path.join(config.DATASET.ROOT, config.DATASET.TEST_SET), transform=transform_clip))
-
-    # return train_dataloader, val_dataloader, test_dataloader, class_map.get(config.DATASET.DATASET), train_set.images
-
-    # assert everything is ManifestDataset
-    return train_set, test_set, train_set_dataset_info, test_set_dataset_info, transform_clip
-
-
-# from vision_datasets.common.data_manifest import _generate_multitask_dataset_manifest
-from vision_datasets.pytorch.dataset import Dataset
-
-class MultiTaskTorchDataset(Dataset):
-    """
-    Dataset class used for pytorch training
-    """
-
-    def __init__(self, manifest_dataset: ManifestDataset, transform=None, transform_task=None, multitask_num_class=None):
-        Dataset.__init__(self, transform)
-        self.dataset = manifest_dataset
-        self.transform_task = transform_task
-        self._task2id = { v: k for k, v in enumerate(manifest_dataset.dataset_manifest._task_names) }
-        self._multitask_num_class = multitask_num_class
-
-    @property
-    def labels(self):
-        return self.dataset.labels
-
-    @property
-    def dataset_resources(self):
-        return self.dataset.dataset_resources
-
-    @property
-    def dataset_info(self):
-        return self.dataset.dataset_info
-
-    def __getitem__(self, index):
-        if isinstance(index, int):
-            image, target, idx_str = self.dataset[index]
-            assert len(target.keys()) == 1
-            task, task_label = list(target.items())[0]
-            # print(target, idx_str, task_label)
-            transform = self.transform_task[ task ]
-            target = [ self.dataset.dataset_manifest._get_cid(t_l, task)  for t_l in task_label ]
-            image, target = transform(image, [target])
-            # make everything 2D - one-hot
-            if len(target) == 1:
-                target = multilabel_to_vec( target, self._multitask_num_class )
-            # target = self.dataset.dataset_manifest._get_cid(task_label, task) 
-            # print(target, transform)
-            # image, target = transform(image, [[target]])
-            return image, torch.tensor(target), idx_str, self._task2id[task]
-        else:
-            return [self.transform(img, target) + (idx,) for img, target, idx in self.dataset[index]]
-
-    def __len__(self):
-        return len(self.dataset)
-
-    def close(self):
-        self.dataset.close()
-
-def create_multitask_manifest(manifest_by_task: dict):
-    from vision_datasets.common.data_manifest import DatasetManifest
-    import copy
-    """
-    Merge several manifests into a multitask dataset in a naive way, assuming images from different manifests are independent different images.
-    Args:
-        manifest_by_task (dict): manifest by task name
-    Returns:
-        a merged multitask manifest
-    """
-
-    task_names = sorted(list(manifest_by_task.keys()))
-    images = []
-    for task_name in task_names:
-        for img in manifest_by_task[task_name].images:
-            new_img = copy.deepcopy(img)
-            new_img.labels = {task_name: new_img.labels}
-            images.append(new_img)
-
-    labelmap = {task_name: manifest_by_task[task_name].labelmap for task_name in task_names}
-    data_types = {task_name: manifest_by_task[task_name].data_type for task_name in task_names}
-
-    return DatasetManifest(images, labelmap, data_types)
-    
-def construct_multitask_dataset(config, feature_type="image", test_split_only=False):
-    from vision_datasets import Usages, DatasetTypes
-    from vision_datasets.common.dataset_info import DatasetInfoFactory, MultiTaskDatasetInfo
-    from vision_datasets.pytorch import TorchDataset
-    
-    if config.DATASET.CENTER_CROP:
-        logging.info('Do center crop')
-        transform_clip_general = transforms.Compose([
-            transforms.Resize(config.INPUT.SIZE[0], interpolation=Image.BICUBIC),
-            transforms.CenterCrop(size=config.INPUT.SIZE),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=config.INPUT.PIXEL_MEAN, std=config.INPUT.PIXEL_STD),
-        ])
-    else:
-        logging.info('no center crop')
-        transform_clip_general = transforms.Compose([
-            transforms.Resize(config.INPUT.SIZE, interpolation=Image.BICUBIC),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=config.INPUT.PIXEL_MEAN, std=config.INPUT.PIXEL_STD),
-        ])
-
-    train_manifest_by_task = dict()
-    test_manifest_by_task = dict()
-    transform_clip_by_task = dict()
-    dataset_info_dict_train, dataset_info_dict_test = {'name': 'mt', 'type': 'multitask', 'tasks': dict(), 'root_folder': config.DATASET.ROOT}, \
-    {'name': 'mt', 'type': 'multitask', 'tasks': dict(), 'root_folder': config.DATASET.ROOT}
-    multitask_train_manifest_info, multitask_test_manifest_info = MultiTaskDatasetInfo(dataset_info_dict_train), MultiTaskDatasetInfo(dataset_info_dict_test)
-    
-    # HACK: use "," to split the dataset names
-    dataset_names = config.DATASET.DATASET.split(',')
-    print(class_map.keys())
-    for dataset_name in dataset_names:
-        print("Build", dataset_name)
-        config.defrost()
-        config.DATASET.DATASET = dataset_name
-        config.freeze()
-        train_dataset, test_dataset, train_set_dataset_info, test_set_dataset_info, task_transform_clip = construct_dataset(config, feature_type, test_split_only)
-        dataset_info_dict_train[ dataset_name ], dataset_info_dict_test[ dataset_name ] = train_set_dataset_info, test_set_dataset_info
-
-        # HACK: ignore the multilabel / multiclass here
-        train_manifest_by_task[ dataset_name ] = train_dataset
-        test_manifest_by_task[ dataset_name ] = test_dataset
-        transform_clip_by_task[ dataset_name ] = task_transform_clip
-
-    multitask_train_manifest = create_multitask_manifest( train_manifest_by_task )
-    multitask_test_manifest = create_multitask_manifest( test_manifest_by_task )
-
-    multitask_train_manifest_info.sub_task_infos = dataset_info_dict_train
-    multitask_test_manifest_info.sub_task_infos = dataset_info_dict_test
-    
-    # REDO the transform_clip for Multi-Label Sub-tasks => Given the total number_classes has changed 
-    multitask_num_class = sum([len(multitask_train_manifest.labelmap[task]) for task in multitask_train_manifest.labelmap])
-    for sub_task in transform_clip_by_task:
-        if dataset_info_dict_train[sub_task].type == DatasetTypes.IC_MULTILABEL:
-            previous_transform = transform_clip_general
-
-            def transform_clip(x, y):
-                return (previous_transform(x), multilabel_to_vec(y, multitask_num_class))
-            transform_clip_by_task[ sub_task ] = transform_clip
-            
-    # few-shot dataset construction
-    if config.DATASET.NUM_SAMPLES_PER_CLASS > 0:
-        num_samples_per_class = config.DATASET.NUM_SAMPLES_PER_CLASS
-        multitask_train_manifest = multitask_train_manifest.sample_few_shot_subset(num_samples_per_class, random_seed=config.DATASET.RANDOM_SEED_SAMPLING)
-
-    # create ManifestDataset
-    manifest_multitask_train = ManifestDataset( multitask_train_manifest_info, multitask_train_manifest )
-    manifest_multitask_test =  ManifestDataset( multitask_test_manifest_info, multitask_test_manifest )
-
-    val_split=0.2
-    multitask_train_manifest_split, multitask_val_manifest_split = multitask_train_manifest.train_val_split( train_ratio=1-val_split, random_seed=config.DATASET.RANDOM_SEED_SAMPLING )
-    train_dataloader = get_dataloader( MultiTaskTorchDataset( ManifestDataset( multitask_train_manifest_info, multitask_train_manifest_split), transform_task=transform_clip_by_task, multitask_num_class=multitask_num_class) )
-    val_dataloader = get_dataloader( MultiTaskTorchDataset( ManifestDataset( multitask_train_manifest_info, multitask_val_manifest_split), transform_task=transform_clip_by_task, multitask_num_class=multitask_num_class) )
-
-    # train_dataloader, val_dataloader = get_dataloader( MultiTaskTorchDataset( manifest_multitask_train, transform_task=transform_clip_by_task), val_split=val_split, batch_size_per_gpu=config.DATALOADER.TRAIN_X.BATCH_SIZE)
-    test_dataloader = get_dataloader( MultiTaskTorchDataset( manifest_multitask_test, transform_task=transform_clip_by_task, multitask_num_class=multitask_num_class) )
-    test_dataloader_by_task = dict()
-    for dataset_name in test_manifest_by_task:
-        task_transform_clip = transform_clip_by_task[ dataset_name ]
-        test_dataloader_by_task[ dataset_name ] =  get_dataloader( TorchDataset( test_manifest_by_task[ dataset_name ], transform=transform_clip_by_task[dataset_name]) )
-    return  train_dataloader, val_dataloader, test_dataloader, multitask_train_manifest, test_dataloader_by_task
+    return train_dataloader, val_dataloader, test_dataloader

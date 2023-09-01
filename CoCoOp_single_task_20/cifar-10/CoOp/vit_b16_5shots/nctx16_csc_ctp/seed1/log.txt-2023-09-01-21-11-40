@@ -1,0 +1,275 @@
+***************
+** Arguments **
+***************
+act_ckpt: 1
+backbone: 
+config_file: configs/trainers/MVLPT/vit_b16.yaml
+cut_contextlen: False
+dataset: cifar-10
+dataset_config_file: 
+dataset_coop: False
+eval_only: False
+head: 
+load_epoch: None
+model_dir: 
+multi_task: False
+multi_task_evalkey: average
+multi_task_label_pertask: False
+no_train: False
+opts: ['TRAINER.MVLPT.VPT.N_CTX', '0', 'TRAINER.MVLPT.COOP.N_CTX', '16', 'TRAINER.MVLPT.COOP.CLASS_TOKEN_POSITION', 'middle', 'TRAINER.MVLPT.COOP.CSC', 'False', 'TEST.NO_TEST', 'False', 'TEST.FINAL_MODEL', 'best_val', 'TRAINER.CUT_CONTEXTLEN', 'True']
+output_dir: ./CoCoOp_single_task_20/cifar-10/CoOp/vit_b16_5shots/nctx16_csc_ctp/seed1
+resume: 
+root: ./CoOp/outputs/datasets
+seed: 1
+shots: 5
+source_domains: None
+target_domains: None
+trainer: MVLPT
+transforms: None
+************
+** Config **
+************
+DATALOADER:
+  K_TRANSFORMS: 1
+  NUM_WORKERS: 8
+  RETURN_IMG0: False
+  TEST:
+    BATCH_SIZE: 100
+    SAMPLER: SequentialSampler
+  TRAIN_U:
+    BATCH_SIZE: 32
+    N_DOMAIN: 0
+    N_INS: 16
+    SAME_AS_X: True
+    SAMPLER: RandomSampler
+  TRAIN_X:
+    BATCH_SIZE: 32
+    N_DOMAIN: 0
+    N_INS: 16
+    SAMPLER: RandomSampler
+DATASET:
+  ALL_AS_UNLABELED: False
+  CENTER_CROP: False
+  CIFAR_C_LEVEL: 1
+  CIFAR_C_TYPE: 
+  COOP: False
+  DATASET: cifar-10
+  MULTITASK: False
+  MULTITASK_EVALKEY: average
+  MULTITASK_LABEL_PERTASK: False
+  NAME: 
+  NUM_LABELED: -1
+  NUM_SAMPLES_PER_CLASS: 5
+  NUM_SHOTS: 5
+  RANDOM_SEED_SAMPLING: 1
+  ROOT: ./CoOp/outputs/datasets
+  SOURCE_DOMAINS: ()
+  STL10_FOLD: -1
+  SUBSAMPLE_CLASSES: all
+  TARGET_DOMAINS: ()
+  TEST_SET: val
+  TRAIN_SET: train
+  VAL_PERCENT: 0.1
+  VAL_SET: 
+INPUT:
+  COLORJITTER_B: 0.4
+  COLORJITTER_C: 0.4
+  COLORJITTER_H: 0.1
+  COLORJITTER_S: 0.4
+  CROP_PADDING: 4
+  CUTOUT_LEN: 16
+  CUTOUT_N: 1
+  GB_K: 21
+  GB_P: 0.5
+  GN_MEAN: 0.0
+  GN_STD: 0.15
+  INTERPOLATION: bicubic
+  NO_TRANSFORM: False
+  PIXEL_MEAN: [0.48145466, 0.4578275, 0.40821073]
+  PIXEL_STD: [0.26862954, 0.26130258, 0.27577711]
+  RANDAUGMENT_M: 10
+  RANDAUGMENT_N: 2
+  RGS_P: 0.2
+  RRCROP_SCALE: (0.08, 1.0)
+  SIZE: (224, 224)
+  TRANSFORMS: ('random_resized_crop', 'random_flip', 'normalize')
+MODEL:
+  BACKBONE:
+    NAME: ViT-B/16
+    PRETRAINED: True
+  HEAD:
+    ACTIVATION: relu
+    BN: True
+    DROPOUT: 0.0
+    HIDDEN_LAYERS: ()
+    NAME: 
+  INIT_WEIGHTS: 
+OPTIM:
+  ADAM_BETA1: 0.9
+  ADAM_BETA2: 0.999
+  BASE_LR_MULT: 0.1
+  GAMMA: 0.1
+  LR: 0.002
+  LR_SCHEDULER: cosine
+  MAX_EPOCH: 200
+  MOMENTUM: 0.9
+  NAME: sgd
+  NEW_LAYERS: ()
+  RMSPROP_ALPHA: 0.99
+  SGD_DAMPNING: 0
+  SGD_NESTEROV: False
+  STAGED_LR: False
+  STEPSIZE: (-1,)
+  WARMUP_CONS_LR: 1e-05
+  WARMUP_EPOCH: 1
+  WARMUP_MIN_LR: 1e-05
+  WARMUP_RECOUNT: True
+  WARMUP_TYPE: constant
+  WEIGHT_DECAY: 0.0005
+OUTPUT_DIR: ./CoCoOp_single_task_20/cifar-10/CoOp/vit_b16_5shots/nctx16_csc_ctp/seed1
+RESUME: 
+SEED: 1
+TEST:
+  COMPUTE_CMAT: False
+  EVALUATOR: Classification
+  FINAL_MODEL: best_val
+  NO_TEST: False
+  PER_CLASS_RESULT: False
+  SPLIT: test
+TRAIN:
+  CHECKPOINT_FREQ: 0
+  COUNT_ITER: train_x
+  PRINT_FREQ: 5
+TRAINER:
+  ACT_CKPT: 1
+  CDAC:
+    CLASS_LR_MULTI: 10
+    P_THRESH: 0.95
+    RAMPUP_COEF: 30
+    RAMPUP_ITRS: 1000
+    STRONG_TRANSFORMS: ()
+    TOPK_MATCH: 5
+  COCOOP:
+    CTX_INIT: 
+    N_CTX: 16
+    PREC: fp16
+  COOP:
+    CLASS_TOKEN_POSITION: end
+    CSC: False
+    CTX_INIT: 
+    N_CTX: 16
+    PREC: fp16
+  CROSSGRAD:
+    ALPHA_D: 0.5
+    ALPHA_F: 0.5
+    EPS_D: 1.0
+    EPS_F: 1.0
+  CUT_CONTEXTLEN: True
+  DAEL:
+    CONF_THRE: 0.95
+    STRONG_TRANSFORMS: ()
+    WEIGHT_U: 0.5
+  DAELDG:
+    CONF_THRE: 0.95
+    STRONG_TRANSFORMS: ()
+    WEIGHT_U: 0.5
+  DDAIG:
+    ALPHA: 0.5
+    CLAMP: False
+    CLAMP_MAX: 1.0
+    CLAMP_MIN: -1.0
+    G_ARCH: 
+    LMDA: 0.3
+    WARMUP: 0
+  DOMAINMIX:
+    ALPHA: 1.0
+    BETA: 1.0
+    TYPE: crossdomain
+  ENTMIN:
+    LMDA: 0.001
+  FIXMATCH:
+    CONF_THRE: 0.95
+    STRONG_TRANSFORMS: ()
+    WEIGHT_U: 1.0
+  M3SDA:
+    LMDA: 0.5
+    N_STEP_F: 4
+  MCD:
+    N_STEP_F: 4
+  MEANTEACHER:
+    EMA_ALPHA: 0.999
+    RAMPUP: 5
+    WEIGHT_U: 1.0
+  MIXMATCH:
+    MIXUP_BETA: 0.75
+    RAMPUP: 20000
+    TEMP: 2.0
+    WEIGHT_U: 100.0
+  MME:
+    LMDA: 0.1
+  MVLPT:
+    COCOOP:
+      CTX_INIT: 
+      N_CTX: 0
+      PREC: fp16
+    COOP:
+      CLASS_TOKEN_POSITION: middle
+      CSC: False
+      CTX_INIT: 
+      N_CTX: 16
+    PREC: fp16
+    PROJECT_DIM: 128
+    PROJECT_METHOD: transformer
+    VPT:
+      CSC: False
+      CTX_INIT: 
+      DEEP: True
+      DROPOUT: 0.0
+      N_CTX: 0
+      PROJECT: -1
+  NAME: MVLPT
+  SE:
+    CONF_THRE: 0.95
+    EMA_ALPHA: 0.999
+    RAMPUP: 300
+USE_CUDA: True
+VERBOSE: True
+VERSION: 1
+Collecting env info ...
+** System info **
+PyTorch version: 1.12.1+cu113
+Is debug build: False
+CUDA used to build PyTorch: 11.3
+ROCM used to build PyTorch: N/A
+
+OS: Ubuntu 22.04.2 LTS (x86_64)
+GCC version: (Ubuntu 11.3.0-1ubuntu1~22.04) 11.3.0
+Clang version: Could not collect
+CMake version: Could not collect
+Libc version: glibc-2.35
+
+Python version: 3.9.17 | packaged by conda-forge | (main, Aug 10 2023, 07:02:31)  [GCC 12.3.0] (64-bit runtime)
+Python platform: Linux-5.19.0-38-generic-x86_64-with-glibc2.35
+Is CUDA available: True
+CUDA runtime version: 11.5.119
+GPU models and configuration: 
+GPU 0: NVIDIA A100-PCIE-40GB
+GPU 1: Tesla V100-PCIE-16GB
+GPU 2: Tesla V100-PCIE-16GB
+
+Nvidia driver version: Could not collect
+cuDNN version: Could not collect
+HIP runtime version: N/A
+MIOpen runtime version: N/A
+Is XNNPACK available: True
+
+Versions of relevant libraries:
+[pip3] numpy==1.24.3
+[pip3] torch==1.12.1+cu113
+[pip3] torchaudio==0.12.1+cu113
+[pip3] torchvision==0.13.1+cu113
+[conda] No relevant packages
+        Pillow (10.0.0)
+
+Loading trainer: MVLPT
+Loading CLIP (backbone: ViT-B/16)

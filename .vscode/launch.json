@@ -1,0 +1,55 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+
+        {
+          "name": "train.py-CIFAR10-CoOp",
+          "type": "python",
+          "request": "launch",
+          "program": "train.py",
+          "console": "integratedTerminal",
+          "justMyCode": false,
+          "env": {
+            "CUDA_VISIBLE_DEVICES": "0"
+          },
+          "args": [
+            "--root=./CoOp/outputs/datasets",
+            "--seed=1",
+            "--trainer=MVLPT",
+            "--config-file=configs/trainers/MVLPT/vit_b16.yaml",
+            "--output-dir=./CoCoOp_single_task_20/cifar-10/CoOp/vit_b16_5shots/nctx16_csc_ctp/seed1",
+            "--dataset=cifar-10",
+            "--shots=5",
+            "TRAINER.MVLPT.VPT.N_CTX",
+            "0",
+            "TRAINER.MVLPT.COOP.N_CTX",
+            "16",
+            "TRAINER.MVLPT.COOP.CLASS_TOKEN_POSITION",
+            "middle",
+            "TRAINER.MVLPT.COOP.CSC",
+            "False",
+            "TEST.NO_TEST",
+            "False",
+            "TEST.FINAL_MODEL",
+            "best_val",
+            "TRAINER.CUT_CONTEXTLEN",
+            "True"
+          ]
+        }
+        
+          
+
+
+    ]
+}
